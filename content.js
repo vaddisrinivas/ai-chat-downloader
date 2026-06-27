@@ -66,8 +66,8 @@ function createFloatingButton() {
 
 // ============ Download Helpers ============
 
-function downloadFallback(content, filename) {
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+function downloadFallback(content, filename, contentType = 'text/markdown;charset=utf-8') {
+    const blob = new Blob([content], { type: contentType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -76,6 +76,56 @@ function downloadFallback(content, filename) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+}
+
+function detectProviderFromUrl(url) {
+    if (url.includes('chatgpt.com')) return 'chatgpt';
+    if (url.includes('claude.ai')) return 'claude';
+    if (url.includes('gemini.google.com')) return 'gemini';
+    if (url.includes('perplexity.ai')) return 'perplexity';
+    if (url.includes('x.com')) return 'grok';
+    if (url.includes('deepseek.com')) return 'deepseek';
+    return 'unknown';
+}
+
+function normalizeRole(role) {
+    const normalized = String(role || '').toLowerCase();
+    if (normalized.includes('user') || normalized === 'you') return 'user';
+    if (normalized.includes('system')) return 'system';
+    if (normalized.includes('tool')) return 'tool';
+    return 'assistant';
+}
+
+function createNormalizedExport(parsedData) {
+    const provider = detectProviderFromUrl(window.location.href);
+    const capturedAt = new Date().toISOString();
+    const title = parsedData.title || document.title || 'Untitled chat';
+
+    return {
+        schema_version: 1,
+        source: 'ai-chat-downloader',
+        provider,
+        title,
+        source_url: window.location.href,
+        captured_at: capturedAt,
+        conversation: {
+            title,
+            provider,
+            source_url: window.location.href,
+            captured_at: capturedAt
+        },
+        messages: (parsedData.messages || []).map((message, index) => ({
+            index,
+            role: normalizeRole(message.role),
+            display_role: message.role || '',
+            content: message.content || '',
+            created_at: capturedAt,
+            time: message.time || '',
+            metadata: {
+                provider_role: message.role || ''
+            }
+        }))
+    };
 }
 
 function downloadLastArtifact() {
@@ -137,19 +187,35 @@ async function handleDownload() {
         }
 
         const markdownContent = parser.formatMarkdown(parsedData);
+        const normalizedExport = createNormalizedExport(parsedData);
+        const jsonContent = JSON.stringify(normalizedExport, null, 2);
         const safeDate = new Date().toISOString().slice(0, 10);
         const safeTitle = (parsedData.title || 'chat').replace(/[\\/:*?"<>|]/g, '_').trim().substring(0, 70) || 'chat';
-        const filename = `${safeTitle}_${safeDate}.md`;
+        const markdownFilename = `${safeTitle}_${safeDate}.md`;
+        const jsonFilename = `${safeTitle}_${safeDate}.json`;
 
         try {
             chrome.runtime.sendMessage({
                 action: "DOWNLOAD",
-                payload: { filename, content: markdownContent }
+                payload: {
+                    filename: markdownFilename,
+                    content: markdownContent,
+                    contentType: 'text/markdown;charset=utf-8'
+                }
+            });
+            chrome.runtime.sendMessage({
+                action: "DOWNLOAD",
+                payload: {
+                    filename: jsonFilename,
+                    content: jsonContent,
+                    contentType: 'application/json;charset=utf-8'
+                }
             });
             showToast(`Downloaded ${parsedData.messages.length} messages`, 'success');
         } catch (err) {
             console.warn("Extension context invalidated, using fallback download");
-            downloadFallback(markdownContent, filename);
+            downloadFallback(markdownContent, markdownFilename, 'text/markdown;charset=utf-8');
+            downloadFallback(jsonContent, jsonFilename, 'application/json;charset=utf-8');
             showToast(`Downloaded ${parsedData.messages.length} messages`, 'success');
         }
     } catch (error) {

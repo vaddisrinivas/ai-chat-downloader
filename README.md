@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Export your AI conversations to clean Markdown files</strong>
+  <strong>Export AI conversations and search them through a local MCP context engine</strong>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 ---
 
-Chrome extension for exporting chat conversations from AI platforms to well-formatted Markdown files. Perfect for archiving, documentation, or sharing AI-generated content.
+Chrome extension for exporting chat conversations from AI platforms to well-formatted Markdown and normalized JSON files. This fork also includes a local-first MCP context engine for importing, searching, daily syncing, and building context packs from those exports.
 
 ## Supported Platforms
 
@@ -81,6 +81,8 @@ Click the extension icon → **Settings** to configure:
 ## Features
 
 - **One-Click Export** — Single click to download entire conversation
+- **Normalized JSON Export** — Saves machine-readable conversation data next to Markdown
+- **Local MCP Context Engine** — Search imported chats and build agent-ready context packs
 - **Auto-Scroll** — Automatically loads full chat history
 - **Clean Markdown** — Proper formatting with headers, code blocks, lists
 - **Code Preservation** — Maintains syntax highlighting language tags
@@ -98,6 +100,7 @@ Click the extension icon → **Settings** to configure:
 Files are saved as:
 ```
 Downloads/AI_Chats/ChatTitle_YYYY-MM-DD.md
+Downloads/AI_Chats/ChatTitle_YYYY-MM-DD.json
 ```
 
 Example output:
@@ -144,6 +147,7 @@ ai-chat-downloader/
 ├── popup.html/js       # Extension popup UI
 ├── options.html/js     # Settings page
 ├── styles.css          # UI styles
+├── mcp/                # Local vault CLI + MCP server
 ├── icons/              # Extension icons
 └── parsers/
     ├── base.js         # Base class + factory + shared methods
@@ -153,6 +157,27 @@ ai-chat-downloader/
     ├── perplexity.js   # Perplexity parser (with sources)
     └── others.js       # Grok + DeepSeek parsers
 ```
+
+## MCP Context Engine
+
+This fork can act as a single-pane memory layer for exported AI chats.
+
+```bash
+npm run sync
+npm run mcp
+node mcp/cli.js search "pricing bug"
+node mcp/cli.js context "pricing bug" --max-chars 8000
+node mcp/cli.js sync --watch-24h
+scripts/install-daily-sync.sh
+```
+
+Default vault:
+
+```bash
+~/.ai-chat-vault
+```
+
+See [docs/MCP_CONTEXT_ENGINE.md](docs/MCP_CONTEXT_ENGINE.md).
 
 ## Contributing
 

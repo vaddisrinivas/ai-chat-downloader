@@ -2,7 +2,7 @@
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "DOWNLOAD") {
-        const { filename, content } = request.payload;
+        const { filename, content, contentType = "text/markdown" } = request.payload;
 
         chrome.storage.sync.get(["downloadFolder"], (result) => {
             let folder = result.downloadFolder || "AI_Chats";
@@ -10,7 +10,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!folder) folder = "AI_Chats";
 
             const fullPath = `${folder}/${filename}`;
-            const blob = new Blob([content], { type: "text/markdown" });
+            const blob = new Blob([content], { type: contentType });
             const reader = new FileReader();
 
             reader.onload = function () {
