@@ -18,7 +18,7 @@
 
 ---
 
-Chrome extension for exporting chat conversations from AI platforms to well-formatted Markdown and normalized JSON files. This fork also includes a local-first MCP context engine for importing, searching, daily syncing, and building context packs from those exports.
+Chrome extension for exporting chat conversations from AI platforms to well-formatted Markdown and normalized JSON files. This fork also includes a local-first MCP context engine for importing browser exports, indexing local assistant histories, searching, daily syncing, and building context packs.
 
 ## Supported Platforms
 
@@ -83,6 +83,8 @@ Click the extension icon → **Settings** to configure:
 - **One-Click Export** — Single click to download entire conversation
 - **Normalized JSON Export** — Saves machine-readable conversation data next to Markdown
 - **Local MCP Context Engine** — Search imported chats and build agent-ready context packs
+- **Local History Indexing** — Index Codex, Claude Code, Gemini/Antigravity, VS Code Chat, and GitHub Copilot histories by reference
+- **Raw Log References** — Keep bulky tool outputs in original files and store `source_file`/`line` pointers instead of duplicating raw logs
 - **Auto-Scroll** — Automatically loads full chat history
 - **Clean Markdown** — Proper formatting with headers, code blocks, lists
 - **Code Preservation** — Maintains syntax highlighting language tags
@@ -164,10 +166,18 @@ This fork can act as a single-pane memory layer for exported AI chats.
 
 ```bash
 npm run sync
+npm run sync:local
 npm run mcp
 node mcp/cli.js search "pricing bug"
+node mcp/cli.js tools "npm run test" --tool exec_command --limit 10
+node mcp/cli.js tool-stats --provider codex
 node mcp/cli.js context "pricing bug" --max-chars 8000
-node mcp/cli.js sync --watch-24h
+node mcp/cli.js raw ~/.codex/sessions/2026/.../rollout.jsonl --line 1234
+npm run export:personal-ai-memory -- --dry-run
+npm run export:personal-ai-memory -- --out ~/.ai-chat-vault/exports/personal-ai-memory.json
+npm run export:personal-ai-memory -- --out ~/.ai-chat-vault/personal-ai-memory-imports --chunk-size 25000 --max-content-chars 4000
+npm run sync:personal-ai-memory
+node mcp/cli.js sync --all --watch-24h
 scripts/install-daily-sync.sh
 ```
 
@@ -178,6 +188,29 @@ Default vault:
 ```
 
 See [docs/MCP_CONTEXT_ENGINE.md](docs/MCP_CONTEXT_ENGINE.md).
+
+## Personal AI Memory Export
+
+To import this vault into the Personal AI Memory Layer extension, export a backup-compatible JSON file:
+
+```bash
+npm run sync
+npm run export:personal-ai-memory -- --dry-run
+npm run export:personal-ai-memory -- --out ~/.ai-chat-vault/exports/personal-ai-memory.json
+npm run export:personal-ai-memory -- --out ~/.ai-chat-vault/personal-ai-memory-imports --chunk-size 25000 --max-content-chars 4000
+```
+
+Then open the Personal AI Memory extension and import the generated JSON as an AI Memory backup.
+
+The export includes Codex, Claude Code, Gemini, GitHub Copilot, VS Code Chat, browser-exported chats, and tool-call rows. Tool outputs that were indexed by reference keep `rawRef` metadata pointing back to the original local file instead of copying every giant output into the export.
+
+Do not commit or push generated vault exports. They can contain private chats, file paths, code, credentials, and tool output snippets.
+
+For hourly refreshes of Personal AI Memory import chunks:
+
+```bash
+scripts/install-personal-ai-memory-sync.sh
+```
 
 ## Contributing
 

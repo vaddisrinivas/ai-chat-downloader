@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import readline from 'node:readline';
+import { readRawRef, syncLocalSources } from './local-sources.js';
 import {
   buildContextPack,
   dailyCheck,
@@ -7,6 +8,8 @@ import {
   importFile,
   listConversations,
   searchChats,
+  searchToolCalls,
+  toolCallStats,
   syncExports
 } from './store.js';
 
@@ -44,6 +47,31 @@ const tools = [
         limit: { type: 'number' }
       },
       required: ['query']
+    }
+  },
+  {
+    name: 'search_tool_calls',
+    description: 'Search the local tool-call bank across Codex, Claude Code, and other indexed assistant histories. Returns tool name, kind, raw_ref pointers, and previews.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        provider: { type: 'string' },
+        tool: { type: 'string' },
+        kind: { type: 'string', enum: ['call', 'result', 'tool'] },
+        limit: { type: 'number' }
+      }
+    }
+  },
+  {
+    name: 'tool_call_stats',
+    description: 'Return counts for indexed tool-call messages by provider, kind, and tool name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        provider: { type: 'string' },
+        limit: { type: 'number' }
+      }
     }
   },
   {
@@ -91,15 +119,63 @@ const tools = [
   }
 ];
 
+tools.splice(1, 0,
+  {
+    name: 'sync_local_sources',
+    description: 'Index local assistant histories into the vault by reference: Claude Code, Codex, Gemini/Antigravity, VS Code Chat, and GitHub Copilot. Raw logs stay in place.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        force: { type: 'boolean' }
+      }
+    }
+  },
+  {
+    name: 'sync_all_sources',
+    description: 'Import browser-export chats and index local assistant histories into the vault. Raw local logs stay referenced, not copied.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dirs: { type: 'array', items: { type: 'string' } },
+        force: { type: 'boolean' }
+      }
+    }
+  },
+  {
+    name: 'read_raw_ref',
+    description: 'Read a bounded snippet from an original raw source file referenced by search results.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source_file: { type: 'string' },
+        line: { type: 'number' },
+        radius: { type: 'number' },
+        max_chars: { type: 'number' }
+      },
+      required: ['source_file']
+    }
+  }
+);
+
 function toTextContent(value) {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   return { content: [{ type: 'text', text }] };
 }
 
-function callTool(name, args = {}) {
+async function callTool(name, args = {}) {
   if (name === 'sync_exports') return syncExports(args);
+  if (name === 'sync_local_sources') return syncLocalSources(args);
+  if (name === 'sync_all_sources') {
+    return {
+      exports: syncExports(args),
+      local_sources: await syncLocalSources(args)
+    };
+  }
+  if (name === 'read_raw_ref') return readRawRef(args);
   if (name === 'import_paths') return args.paths.map((file) => importFile(file));
   if (name === 'search_chats') return searchChats(args);
+  if (name === 'search_tool_calls') return searchToolCalls(args);
+  if (name === 'tool_call_stats') return toolCallStats(args);
   if (name === 'list_conversations') return listConversations(args);
   if (name === 'get_conversation') return getConversation(args.id);
   if (name === 'build_context_pack') return buildContextPack(args);
@@ -147,7 +223,7 @@ async function handle(message) {
   }
 
   if (method === 'tools/call') {
-    const result = callTool(params.name, params.arguments || {});
+    const result = await callTool(params.name, params.arguments || {});
     respond(id, toTextContent(result));
     return;
   }

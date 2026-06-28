@@ -8,9 +8,16 @@
     "ai-chat-vault-mcp": "./mcp/server.js"
   },
   "scripts": {
-    "check": "node --check background.js && node --check content.js && node --check popup.js && node --check options.js && node --check parsers/base.js && node --check parsers/chatgpt.js && node --check parsers/claude.js && node --check parsers/gemini.js && node --check parsers/perplexity.js && node --check parsers/others.js && node --check mcp/store.js && node --check mcp/cli.js && node --check mcp/server.js",
-    "sync": "node mcp/cli.js sync",
-    "daily": "node mcp/cli.js sync --watch-24h",
+    "check": "node --check background.js && node --check content.js && node --check popup.js && node --check options.js && node --check parsers/base.js && node --check parsers/chatgpt.js && node --check parsers/claude.js && node --check parsers/gemini.js && node --check parsers/perplexity.js && node --check parsers/others.js && node --check mcp/store.js && node --check mcp/cli.js && node --check mcp/server.js && node --check scripts/export-perplexity-web.js && node --check scripts/import-ai-archives.js && node --check scripts/export-personal-ai-memory.js && node --check scripts/personal-ai-memory-native-host.js",
+    "export:perplexity": "node scripts/export-perplexity-web.js",
+    "export:personal-ai-memory": "node scripts/export-personal-ai-memory.js",
+    "import:archives": "node scripts/import-ai-archives.js",
+    "sync": "node mcp/cli.js sync --all",
+    "sync:exports": "node mcp/cli.js sync",
+    "sync:local": "node mcp/cli.js sync --local",
+    "sync:personal-ai-memory": "bash scripts/sync-personal-ai-memory.sh",
+    "install:personal-ai-memory-native-host": "bash scripts/install-personal-ai-memory-native-host.sh",
+    "daily": "node mcp/cli.js sync --all --watch-24h",
     "mcp": "node mcp/server.js"
   },
   "engines": {

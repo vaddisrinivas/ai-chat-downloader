@@ -2,13 +2,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-NODE_BIN="${NODE_BIN:-$(command -v node)}"
-LABEL="com.ai-chat-vault.daily-sync"
+LABEL="com.ai-chat-vault.personal-ai-memory-sync"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 LOG_DIR="${HOME}/.ai-chat-vault/logs"
 
 mkdir -p "$(dirname "${PLIST}")" "${LOG_DIR}"
+chmod +x "${SCRIPT_DIR}/sync-personal-ai-memory.sh"
 
 cat > "${PLIST}" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -20,18 +19,16 @@ cat > "${PLIST}" <<PLIST
   <string>${LABEL}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>-lc</string>
-    <string>${NODE_BIN} ${REPO_ROOT}/scripts/import-ai-archives.js --source ${HOME}/Downloads --source ${HOME}/Desktop --sync &amp;&amp; ${NODE_BIN} ${REPO_ROOT}/mcp/cli.js sync --all</string>
+    <string>${SCRIPT_DIR}/sync-personal-ai-memory.sh</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>StartInterval</key>
-  <integer>86400</integer>
+  <integer>3600</integer>
   <key>StandardOutPath</key>
-  <string>${LOG_DIR}/daily-sync.out.log</string>
+  <string>${LOG_DIR}/personal-ai-memory-sync.out.log</string>
   <key>StandardErrorPath</key>
-  <string>${LOG_DIR}/daily-sync.err.log</string>
+  <string>${LOG_DIR}/personal-ai-memory-sync.err.log</string>
 </dict>
 </plist>
 PLIST
@@ -44,3 +41,4 @@ launchctl bootstrap "gui/$(id -u)" "${PLIST}"
 launchctl kickstart -k "gui/$(id -u)/${LABEL}"
 
 echo "${PLIST}"
+

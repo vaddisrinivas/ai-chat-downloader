@@ -54,6 +54,8 @@ function normalizeProvider(value) {
   if (text.includes('gemini')) return 'gemini';
   if (text.includes('perplexity')) return 'perplexity';
   if (text.includes('codex')) return 'codex';
+  if (text.includes('copilot')) return 'github-copilot';
+  if (text.includes('vscode') || text.includes('vs code')) return 'vscode-chat';
   if (text.includes('grok')) return 'grok';
   if (text.includes('deepseek')) return 'deepseek';
   return 'unknown';
@@ -90,63 +92,80 @@ function messageIdFor(conversationId, message, index) {
   ].join('|'));
 }
 
-function upsertConversation(conversation, messages) {
+export function upsertConversation(conversation, messages) {
+  return upsertConversationBatch([{ conversation, messages }])[0];
+}
+
+export function upsertConversationBatch(items) {
   ensureStore();
   const conversationRows = readJsonl(CONVERSATIONS_FILE);
   const messageRows = readJsonl(MESSAGES_FILE);
   const conversationById = new Map(conversationRows.map((row) => [row.id, row]));
   const messageById = new Map(messageRows.map((row) => [row.id, row]));
+  const results = [];
 
-  const id = conversation.id || conversationIdFor(conversation);
-  const now = new Date().toISOString();
-  const normalizedConversation = {
-    id,
-    provider: normalizeProvider(conversation.provider),
-    title: conversation.title || 'Untitled chat',
-    source_url: conversation.source_url || null,
-    source_file: conversation.source_file || null,
-    created_at: safeDate(conversation.created_at) || safeDate(conversation.captured_at) || now,
-    updated_at: safeDate(conversation.updated_at) || safeDate(conversation.captured_at) || now,
-    imported_at: now,
-    tags: conversation.tags || [],
-    metadata: conversation.metadata || {}
-  };
-
-  conversationById.set(id, {
-    ...conversationById.get(id),
-    ...normalizedConversation
-  });
-
-  messages.forEach((message, index) => {
-    const content = String(message.content || '').trim();
-    if (!content) return;
-
-    const normalizedMessage = {
-      id: message.id || messageIdFor(id, message, index),
-      conversation_id: id,
-      provider: normalizedConversation.provider,
-      role: normalizeRole(message.role || message.display_role),
-      display_role: message.display_role || message.role || '',
-      content,
-      created_at: safeDate(message.created_at) || normalizedConversation.created_at,
-      index: Number.isFinite(message.index) ? message.index : index,
-      token_estimate: Math.ceil(content.length / 4),
-      metadata: message.metadata || {}
+  for (const item of items) {
+    const conversation = item.conversation || {};
+    const messages = Array.isArray(item.messages) ? item.messages : [];
+    const id = conversation.id || conversationIdFor(conversation);
+    const now = new Date().toISOString();
+    const normalizedConversation = {
+      id,
+      provider: normalizeProvider(conversation.provider),
+      title: conversation.title || 'Untitled chat',
+      source_url: conversation.source_url || null,
+      source_file: conversation.source_file || null,
+      created_at: safeDate(conversation.created_at) || safeDate(conversation.captured_at) || now,
+      updated_at: safeDate(conversation.updated_at) || safeDate(conversation.captured_at) || now,
+      imported_at: now,
+      tags: conversation.tags || [],
+      metadata: conversation.metadata || {}
     };
 
-    messageById.set(normalizedMessage.id, {
-      ...messageById.get(normalizedMessage.id),
-      ...normalizedMessage
+    conversationById.set(id, {
+      ...conversationById.get(id),
+      ...normalizedConversation
     });
-  });
 
-  writeJsonl(CONVERSATIONS_FILE, [...conversationById.values()].sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))));
-  writeJsonl(MESSAGES_FILE, [...messageById.values()].sort((a, b) => {
+    let importedMessages = 0;
+    messages.forEach((message, index) => {
+      const content = String(message.content || '').trim();
+      if (!content) return;
+
+      const normalizedMessage = {
+        id: message.id || messageIdFor(id, message, index),
+        conversation_id: id,
+        provider: normalizeProvider(message.provider || normalizedConversation.provider),
+        role: normalizeRole(message.role || message.display_role),
+        display_role: message.display_role || message.role || '',
+        content,
+        created_at: safeDate(message.created_at) || normalizedConversation.created_at,
+        index: Number.isFinite(message.index) ? message.index : index,
+        token_estimate: Math.ceil(content.length / 4),
+        metadata: message.metadata || {}
+      };
+
+      messageById.set(normalizedMessage.id, {
+        ...messageById.get(normalizedMessage.id),
+        ...normalizedMessage
+      });
+      importedMessages += 1;
+    });
+
+    results.push({ conversation: normalizedConversation, imported_messages: importedMessages });
+  }
+
+  const sortedMessages = [...messageById.values()].sort((a, b) => {
     if (a.conversation_id === b.conversation_id) return a.index - b.index;
     return String(b.created_at).localeCompare(String(a.created_at));
-  }));
+  });
+  const conversationIdsWithMessages = new Set(sortedMessages.map((row) => row.conversation_id));
+  writeJsonl(CONVERSATIONS_FILE, [...conversationById.values()]
+    .filter((row) => conversationIdsWithMessages.has(row.id))
+    .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))));
+  writeJsonl(MESSAGES_FILE, sortedMessages);
 
-  return { conversation: normalizedConversation, imported_messages: messages.length };
+  return results;
 }
 
 function parseNormalizedJson(raw, sourceFile) {
@@ -160,8 +179,10 @@ function parseNormalizedJson(raw, sourceFile) {
     source_file: sourceFile,
     captured_at: payload.captured_at || payload.conversation?.captured_at || null,
     metadata: {
-      source: payload.source || 'json',
-      schema_version: payload.schema_version || null
+      ...(payload.conversation?.metadata || {}),
+      ...(payload.metadata || {}),
+      source: payload.source || payload.conversation?.metadata?.source || payload.metadata?.source || 'json',
+      schema_version: payload.schema_version || payload.metadata?.schema_version || null
     }
   };
 
@@ -212,13 +233,19 @@ function parseMarkdown(raw, sourceFile) {
   };
 }
 
-export function importFile(filePath) {
+function parseExportFile(filePath) {
   const resolved = path.resolve(filePath);
   const raw = fs.readFileSync(resolved, 'utf8');
   const ext = path.extname(resolved).toLowerCase();
   const parsed = ext === '.json'
     ? parseNormalizedJson(raw, resolved)
     : parseMarkdown(raw, resolved);
+
+  return { resolved, parsed };
+}
+
+export function importFile(filePath) {
+  const { resolved, parsed } = parseExportFile(filePath);
 
   if (!parsed.messages.length) {
     return { file: resolved, imported_messages: 0, skipped: true };
@@ -264,6 +291,7 @@ export function syncExports(options = {}) {
     : (process.env.AI_CHAT_EXPORT_DIRS ? process.env.AI_CHAT_EXPORT_DIRS.split(path.delimiter) : DEFAULT_EXPORT_DIRS);
   const state = readSyncState();
   const files = dirs.flatMap((dir) => walkFiles(path.resolve(dir)));
+  const parsedItems = [];
   const results = [];
 
   for (const file of files) {
@@ -273,12 +301,31 @@ export function syncExports(options = {}) {
     if (!options.force && state.files[key] === fingerprint) continue;
 
     try {
-      const result = importFile(file);
-      results.push(result);
-      state.files[key] = fingerprint;
+      const { resolved, parsed } = parseExportFile(file);
+      if (!parsed.messages.length) {
+        results.push({ file: resolved, imported_messages: 0, skipped: true });
+        state.files[key] = fingerprint;
+        continue;
+      }
+      parsedItems.push({ file: resolved, fingerprint, stateKey: key, ...parsed });
     } catch (error) {
       results.push({ file, error: error.message });
     }
+  }
+
+  if (parsedItems.length) {
+    const batchResults = upsertConversationBatch(parsedItems);
+    batchResults.forEach((result, index) => {
+      const item = parsedItems[index];
+      results.push({
+        file: item.file,
+        conversation_id: result.conversation.id,
+        provider: result.conversation.provider,
+        title: result.conversation.title,
+        imported_messages: result.imported_messages
+      });
+      state.files[item.stateKey] = item.fingerprint;
+    });
   }
 
   state.last_sync_at = new Date().toISOString();
@@ -335,6 +382,148 @@ export function searchChats(options = {}) {
         content_preview: message.content.slice(0, 700)
       }
     }));
+}
+
+function isToolMessage(message) {
+  const displayRole = String(message.display_role || '').toLowerCase();
+  const content = String(message.content || '');
+  return message.role === 'tool'
+    || displayRole.startsWith('tool')
+    || content.startsWith('[tool_call]')
+    || content.startsWith('[tool_result]');
+}
+
+function toolKindFor(message) {
+  const displayRole = String(message.display_role || '').toLowerCase();
+  const content = String(message.content || '');
+  if (content.startsWith('[tool_call]') || displayRole.startsWith('tool call')) return 'call';
+  if (content.startsWith('[tool_result]') || displayRole.startsWith('tool result')) return 'result';
+  return 'tool';
+}
+
+function toolNameFor(message) {
+  const metadata = message.metadata || {};
+  if (metadata.tool_name) return metadata.tool_name;
+  const displayRole = String(message.display_role || '');
+  const displayMatch = displayRole.match(/^tool call:\s*(.+)$/i);
+  if (displayMatch) return displayMatch[1].trim();
+  const callMatch = String(message.content || '').match(/^\[tool_call\]\s*([^\n]+)/);
+  if (callMatch) return callMatch[1].trim();
+  if (toolKindFor(message) === 'result') return 'tool_result';
+  return displayRole || 'tool';
+}
+
+function contentPreview(message, maxChars = 1000) {
+  const content = String(message.content || '');
+  return content.length > maxChars ? `${content.slice(0, maxChars)}...` : content;
+}
+
+export function searchToolCalls(options = {}) {
+  const query = String(options.query || '').trim().toLowerCase();
+  const terms = query.split(/\s+/).filter(Boolean);
+  const provider = options.provider ? normalizeProvider(options.provider) : null;
+  const tool = options.tool ? String(options.tool).toLowerCase() : null;
+  const kind = options.kind ? String(options.kind).toLowerCase() : null;
+  const limit = Math.max(1, Number(options.limit || 20));
+  const conversations = new Map(readJsonl(CONVERSATIONS_FILE).map((row) => [row.id, row]));
+
+  return readJsonl(MESSAGES_FILE)
+    .filter((message) => isToolMessage(message))
+    .map((message) => {
+      const conversation = conversations.get(message.conversation_id);
+      const toolName = toolNameFor(message);
+      const toolKind = toolKindFor(message);
+      return { message, conversation, toolName, toolKind };
+    })
+    .filter((row) => !provider || row.message.provider === provider)
+    .filter((row) => !tool || row.toolName.toLowerCase() === tool || row.toolName.toLowerCase().includes(tool))
+    .filter((row) => !kind || row.toolKind === kind)
+    .map((row) => {
+      const metadata = row.message.metadata || {};
+      const rawRef = metadata.raw_ref || {};
+      const haystack = [
+        row.toolName,
+        row.toolKind,
+        row.message.content,
+        row.message.display_role,
+        row.conversation?.title,
+        metadata.cwd,
+        rawRef.source_file,
+        rawRef.call_id
+      ].filter(Boolean).join(' ').toLowerCase();
+      const score = terms.length
+        ? terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0)
+        : 1;
+      return { ...row, score };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score || String(b.message.created_at).localeCompare(String(a.message.created_at)))
+    .slice(0, limit)
+    .map((row) => ({
+      score: row.score,
+      conversation: row.conversation ? {
+        id: row.conversation.id,
+        provider: row.conversation.provider,
+        title: row.conversation.title,
+        source_file: row.conversation.source_file,
+        updated_at: row.conversation.updated_at,
+        metadata: row.conversation.metadata
+      } : null,
+      tool_call: {
+        id: row.message.id,
+        conversation_id: row.message.conversation_id,
+        provider: row.message.provider,
+        name: row.toolName,
+        kind: row.toolKind,
+        display_role: row.message.display_role,
+        created_at: row.message.created_at,
+        index: row.message.index,
+        content_preview: contentPreview(row.message),
+        metadata: row.message.metadata || {},
+        raw_ref: row.message.metadata?.raw_ref || null,
+        raw_ref_only: Boolean(row.message.metadata?.raw_ref_only),
+        truncated: Boolean(row.message.truncated)
+      }
+    }));
+}
+
+export function toolCallStats(options = {}) {
+  const provider = options.provider ? normalizeProvider(options.provider) : null;
+  const byProvider = {};
+  const byTool = {};
+  const byKind = {};
+  let totalToolMessages = 0;
+  let rawRefMessages = 0;
+  let rawRefOnlyMessages = 0;
+
+  for (const message of readJsonl(MESSAGES_FILE)) {
+    if (!isToolMessage(message)) continue;
+    if (provider && message.provider !== provider) continue;
+    totalToolMessages += 1;
+    const toolName = toolNameFor(message);
+    const kind = toolKindFor(message);
+    byProvider[message.provider] = (byProvider[message.provider] || 0) + 1;
+    byTool[toolName] = (byTool[toolName] || 0) + 1;
+    byKind[kind] = (byKind[kind] || 0) + 1;
+    if (message.metadata?.raw_ref) rawRefMessages += 1;
+    if (message.metadata?.raw_ref_only) rawRefOnlyMessages += 1;
+  }
+
+  const top = (obj, limit = 20) => Object.entries(obj)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, count }));
+
+  return {
+    store_home: STORE_HOME,
+    provider: provider || null,
+    total_tool_messages: totalToolMessages,
+    raw_ref_messages: rawRefMessages,
+    raw_ref_only_messages: rawRefOnlyMessages,
+    by_provider: byProvider,
+    by_kind: byKind,
+    top_tools: top(byTool, Number(options.limit || 20))
+  };
 }
 
 export function buildContextPack(options = {}) {
